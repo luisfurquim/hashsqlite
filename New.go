@@ -58,9 +58,12 @@ tableLoop:
 
 				if foreign, ok = f.Tag.Lookup("foreign"); ok && len(foreign)>0 {
 					fld.foreign = "`" + foreign + "`"
+				} else {
+					fld.foreign = ""
 				}
+
+				fldList = append(fldList, fld)
 			}
-			fldList = append(fldList, fld)
 		}
 
 		if len(fldList) > 0 {
