@@ -14,7 +14,18 @@ type WhereT struct {
 	Where map[string]*sqlite.Stmt
 }
 
+type table struct {
+	name string
+	fields []field
+}
+
+type field struct {
+	name string
+	foreign string
+}
+
 type HashSqlite struct {
+	tables map[string]table
    Find map[string]WhereT `json:"-"`
    FindJoined map[string]WhereT `json:"-"`
    List map[string]*sqlite.Stmt `json:"-"`
@@ -24,11 +35,11 @@ type HashSqlite struct {
 }
 
 type GooseG struct {
-	Spec goose.Alert
+	Init goose.Alert
 }
 
 var Goose GooseG = GooseG{
-	Spec: goose.Alert(2),
+	Init: goose.Alert(2),
 }
 
 var ErrSpecNotStruct error = errors.New("Specification is not of struct type")
