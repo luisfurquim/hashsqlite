@@ -68,7 +68,7 @@ tableLoop:
 				name: tabName,
 				fields: fldList,
 			}
-			fmt.Printf(`CREATE TABLE IF NOT EXISTS %s (%s)`, tabName, fieldJoin(fldList))
+			fmt.Printf(`CREATE TABLE IF NOT EXISTS %s (%s)\n`, tabName, fieldJoin(fldList))
 /*
 			err = ds.db.Exec(`CREATE TABLE IF NOT EXISTS dataset (id_user, locator, Name, Organizer, Comments, DateCreated, LastUpdate, Stage)`)
 			if err != nil {
