@@ -20,6 +20,7 @@ func New(db *sqlite.Conn, tabs ...interface{}) (*HashSqlite, error) {
 	var i int
 	var hs HashSqlite
 	var foreign string
+	var err error
 
 	hs.tables = map[string]table{}
 
@@ -71,14 +72,11 @@ tableLoop:
 				name: tabName,
 				fields: fldList,
 			}
-			fmt.Printf(`CREATE TABLE IF NOT EXISTS %s (%s)\n`, tabName, fieldJoin(fldList))
-/*
-			err = ds.db.Exec(`CREATE TABLE IF NOT EXISTS dataset (id_user, locator, Name, Organizer, Comments, DateCreated, LastUpdate, Stage)`)
+			err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (%s)`, tabName, fieldJoin(fldList)))
 			if err != nil {
-				Goose.Logf(0,"Err creating research table: %s", err)
-				return
+				Goose.Init.Logf(1,"Error creating %s table: %s", tabName, err)
+				return nil, err
 			}
-*/
 		}
 	}
 
