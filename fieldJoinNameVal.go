@@ -1,6 +1,6 @@
 package hashsqlite
 
-func fieldJoin(fld []field) string {
+func fieldJoinNameVal(fld []field) string {
 	var f field
 	var s string
 
@@ -11,7 +11,7 @@ func fieldJoin(fld []field) string {
 		if len(s)>0 {
 			s += ","
 		}
-		s += "`" + f.name + "`"
+		s += "`" + f.name + "`=?"
 	}
 
 	return s
