@@ -12,7 +12,10 @@ func (hs *HashSqlite) getParmValues(tabName string, refRow reflect.Value, recurs
 
 	parms = make([]interface{}, 0, len(hs.tables[tabName].fields))
 	for _, fld = range hs.tables[tabName].fields {
-		if fld.joinList {
+		if fld.joinList { //aqui
+			fk = refRow.Field(fld.index)
+			if isNonEmptySlice(fk) {
+			}
 			continue
 		}
 

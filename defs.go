@@ -6,12 +6,10 @@ import (
    "github.com/luisfurquim/goose"
 )
 
-type TabCondT struct {
-	Tab, Cond string
-}
-
-type WhereT struct {
-	Where map[string]*sqlite.Stmt
+type At struct {
+	Table interface{}
+	With string
+	By map[string]interface{}
 }
 
 type Schema struct {
@@ -34,16 +32,24 @@ type field struct {
 	index int
 }
 
+type tabRule struct {
+	table string
+	rule string
+}
+
 type list struct {
+//	tabName string
 	cols []int
-	filterLen int
+	joins map[int]tabRule
+//	filterLen int
 	stmt *sqlite.Stmt
 }
 
 type listSpec struct {
-	cols []string
-	sort []string
-	filter string
+	cols           []string
+	colTypes map[int]string
+	sort           []string
+	filter           string
 }
 
 type HashSqlite struct {
@@ -52,22 +58,19 @@ type HashSqlite struct {
 
 	db *sqlite.Conn
 
+	list map[string]map[string]*list
+
 	insert map[string]*sqlite.Stmt
 	link map[string]*sqlite.Stmt
 	unlink map[string]*sqlite.Stmt
 	updateBy map[string]map[string]*sqlite.Stmt
 	count map[string]*sqlite.Stmt
 	countBy map[string]map[string]*sqlite.Stmt
-	list map[string]map[string]list
 	listJoin map[string]map[string]*sqlite.Stmt
 	listBy map[string]map[string]*sqlite.Stmt
 	exists map[string]map[string]*sqlite.Stmt
 	delete map[string]map[string]*sqlite.Stmt
 
-//   Find map[string]WhereT `json:"-"` // Find(&T1{}, Join{}, Where{})
-//   FindJoined map[string]WhereT `json:"-"`
-//   List map[string]*sqlite.Stmt `json:"-"`
-//   ListJoined map[string]WhereT `json:"-"`
 }
 
 type GooseG struct {
@@ -77,6 +80,7 @@ type GooseG struct {
 
 var Goose GooseG = GooseG{
 	Init: goose.Alert(2),
+	Query: goose.Alert(2),
 }
 
 var ErrSpecNotStruct         error = errors.New("Specification is not of struct type")

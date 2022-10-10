@@ -38,9 +38,14 @@ func New(db *sqlite.Conn, schema Schema) (*HashSqlite, error) {
 	var colNames string
 	var colDef string
 	var sortDef string
-	var filterLen int
+//	var filterLen int
 	var sortSpec string
 	var filterSpec string
+	var parts []string
+	var allJoins map[string]map[string]map[int]tabRule
+	var flds map[int]tabRule
+	var index int
+	var fRule tabRule
 
 	if len(schema.Tables) == 0 {
 		Goose.Init.Logf(1,"Error: %s", ErrNoTablesFound)
@@ -54,10 +59,12 @@ func New(db *sqlite.Conn, schema Schema) (*HashSqlite, error) {
 	hs.updateBy = map[string]map[string]*sqlite.Stmt{}
 	hs.count    = map[string]*sqlite.Stmt{}
 	hs.countBy  = map[string]map[string]*sqlite.Stmt{}
-	hs.list     = map[string]map[string]list{}
+	hs.list     = map[string]map[string]*list{}
 	hs.listBy   = map[string]map[string]*sqlite.Stmt{}
 	hs.exists   = map[string]map[string]*sqlite.Stmt{}
 	hs.delete   = map[string]map[string]*sqlite.Stmt{}
+
+	allJoins    = map[string]map[string]map[int]tabRule{}
 
 	hs.tableType = make(map[string]string, len(schema.Tables))
 	for _, tab = range schema.Tables {
@@ -89,6 +96,7 @@ tableLoop1:
 		}
 
 		hs.tableType[reftab.Name()] = tabName
+		allJoins[tabName] = map[string]map[int]tabRule{}
 	}
 
 	Goose.Init.Logf(0,"%#v",hs.tableType)
@@ -119,13 +127,18 @@ tableLoop:
 				tabName = fldName
 			} else if colNames, ok = f.Tag.Lookup("cols"); ok && len(colNames)>0 {
 				sortSpec, _ = f.Tag.Lookup("sort")
-				filterSpec, _ = f.Tag.Lookup("filter")
+				filterSpec, _ = f.Tag.Lookup("by")
 
-				tmpList[f.Name] = listSpec{
+				lSpec := listSpec{
 					cols: strings.Split(colNames, ","),
-					sort: strings.Split(sortSpec, ","),
 					filter: filterSpec,
 				}
+				if len(sortSpec) > 0 {
+					lSpec.sort = strings.Split(sortSpec, ",")
+				}
+
+				tmpList[f.Name] = lSpec
+
 			} else {
 				fld.joinList = false
 				if f.Tag == "pk" {
@@ -152,7 +165,7 @@ tableLoop:
 					} else {
 						Goose.Init.Logf(0, "fld.name: %s => %s", fld.name, f.Type.Name())
 					}
-				} else if f.Type.Kind() == reflect.Array || f.Type.Kind() == reflect.Slice {
+				} else if f.Type.Kind() == reflect.Slice {
 					if xref, ok = hs.tableType[f.Type.Elem().Name()]; ok {
 						xrefs[xref] = struct{}{}
 					} else {
@@ -178,13 +191,39 @@ tableLoop:
 				pkIndex: pkIndex,
 			}
 
+			hs.list[tabName] = map[string]*list{}
+
+			colNames, cols = fieldJoin(fldList)
+
+			err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (%s)`, tabName, colNames))
+			if err != nil {
+				Goose.Init.Logf(1,"Error creating %s table: %s", tabName, err)
+				return nil, err
+			}
+
+			if len(pkName)>0 {
+				colNames = "rowid," + colNames
+				cols = append([]int{pkIndex}, cols...)
+			}
+
+			stmt, err = db.Prepare(fmt.Sprintf(`SELECT %s FROM %s ORDER BY rowid`, colNames, tabName))
+			if err != nil {
+				Goose.Init.Logf(1,"Err compiling list * from %s: %s", tabName, err)
+				return nil, err
+			}
+
+			hs.list[tabName]["*"] = &list{
+//				tabName: tabName,
+				cols: cols,
+				stmt: stmt,
+			}
+
 			if len(tmpList) > 0 {
-				hs.list[tabName] = map[string]list{}
 				for rule, spec = range tmpList {
 					cols = make([]int, len(spec.cols))
 					colDef = ""
 					for j=0; j<len(spec.cols); j++ {
-						if spec.cols[j] == pkName {
+						if (spec.cols[j] == pkName) || (spec.cols[j] == "rowid") {
 							cols[j] = pkIndex
 							if len(colDef) > 0 {
 								colDef += ","
@@ -192,13 +231,14 @@ tableLoop:
 							colDef += "rowid"
 						} else {
 							ok = false
+							parts = strings.Split(spec.cols[j], ":")
 							for k=0; k<len(fldList); k++ {
-								if spec.cols[j] == fldList[k].name {
+								if parts[0] == fldList[k].name {
 									cols[j] = fldList[k].index
 									if len(colDef) > 0 {
 										colDef += ","
 									}
-									colDef += fldList[k].name
+									colDef += parts[0]
 									ok = true
 									break
 								}
@@ -208,6 +248,15 @@ tableLoop:
 								Goose.Init.Logf(1,"tmpList %#v col %s", tmpList, spec.cols[j])
 								Goose.Init.Logf(1,"fldList %#v", fldList)
 								return nil, ErrColumnNotFound
+							}
+							if len(parts) > 1 {
+								if _, ok = allJoins[tabName][rule]; !ok {
+									allJoins[tabName][rule] = map[int]tabRule{}
+								}
+								allJoins[tabName][rule][fldList[k].index] = tabRule{
+									table: hs.tableType[reftab.Field(fldList[k].index).Type.Elem().Name()],
+									rule:  parts[1],
+								}
 							}
 						}
 					}
@@ -230,7 +279,7 @@ tableLoop:
 					if len(spec.filter) > 0 {
 						spec.filter = " WHERE " + spec.filter
 					}
-					filterLen = len(strings.Split(spec.filter,"?")) - 1
+//					filterLen = len(strings.Split(spec.filter,"?")) - 1
 
 					stmt, err = db.Prepare(fmt.Sprintf(`SELECT %s FROM %s%s%s`, colDef, tabName, spec.filter, sortDef))
 					if err != nil {
@@ -241,35 +290,27 @@ tableLoop:
 						return nil, err
 					}
 
-					hs.list[tabName][rule] = list{
+					hs.list[tabName][rule] = &list{
+//						tabName: tabName,
 						cols: cols,
-						filterLen: filterLen,
+//						filterLen: filterLen,
 						stmt: stmt,
 					}
 				}
 			}
 
 			if len(pkName) > 0 {
-				if len(hs.list[tabName]) == 0 {
-					hs.list[tabName] = map[string]list{}
-				}
 				stmt, err = db.Prepare(fmt.Sprintf(`SELECT rowid FROM %s ORDER BY rowid`,  tabName))
 				if err != nil {
 					Goose.Init.Logf(1,"Err compiling list 0 from %s: %s", tabName, err)
 					return nil, err
 				}
 
-				hs.list[tabName]["0"] = list{
+				hs.list[tabName]["0"] = &list{
+//					tabName: tabName,
 					cols: []int{pkIndex},
 					stmt: stmt,
 				}
-			}
-
-			fmt.Printf("CREATE TABLE IF NOT EXISTS %s (%s)\n", tabName, fieldJoin(fldList))
-			err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (%s)`, tabName, fieldJoin(fldList)))
-			if err != nil {
-				Goose.Init.Logf(1,"Error creating %s table: %s", tabName, err)
-				return nil, err
 			}
 
 			Goose.Init.Logf(0,`INSERT INTO ` + tabName + ` VALUES (?` + strings.Repeat(",?",fieldLen(fldList)-1) + `)`)
@@ -350,13 +391,33 @@ tableLoop:
 				return nil, err
 			}
 
-			hs.listJoin[tabName] = map[string]*sqlite.Stmt{}
-			hs.listJoin[tabName][refTable], err = db.Prepare(fmt.Sprintf(`SELECT %s.* FROM %s_%s INNER JOIN %s ON id_%s=%s.rowid WHERE id_%s=? `, refTable, tabName, refTable, refTable, refTable, refTable, tabName))
+			if len(hs.listJoin[tabName]) == 0 {
+				hs.listJoin[tabName] = map[string]*sqlite.Stmt{}
+			}
+			hs.listJoin[tabName][refTable], err = db.Prepare(fmt.Sprintf(`SELECT id_%s FROM %s_%s WHERE id_%s=? `, refTable, tabName, refTable, tabName))
 			if err != nil {
 				Goose.Init.Logf(1,"Err compiling exists: %s", err)
 				return nil, err
 			}
 
+			if len(hs.listJoin[refTable]) == 0 {
+				hs.listJoin[refTable] = map[string]*sqlite.Stmt{}
+			}
+			hs.listJoin[refTable][tabName], err = db.Prepare(fmt.Sprintf(`SELECT id_%s FROM %s_%s WHERE id_%s=? `, tabName, tabName, refTable, refTable))
+			if err != nil {
+				Goose.Init.Logf(1,"Err compiling exists: %s", err)
+				return nil, err
+			}
+
+		}
+
+		for rule, flds = range allJoins[tabName] {
+			if hs.list[tabName][rule].joins == nil {
+				hs.list[tabName][rule].joins = map[int]tabRule{}
+			}
+			for index, fRule = range flds {
+				hs.list[tabName][rule].joins[index] = fRule
+			}
 		}
 	}
 

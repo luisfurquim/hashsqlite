@@ -19,6 +19,7 @@ func (hs *HashSqlite) Save(row interface{}) (int64, error) {
 	Goose.Query.Logf(0, "tabName: %s, refRow: %#v", tabName, refRow)
 
 	id, parms = hs.getParmValues(tabName, refRow, func(r interface{}) {
+		// recursively save related tables
 		hs.Save(r)
 	})
 

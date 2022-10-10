@@ -14,6 +14,8 @@ func (hs *HashSqlite) getMultiRefs(row interface{}) (string, reflect.Value, bool
 
 	reftab = reflect.TypeOf(row)
 
+	Goose.Init.Logf(0,"%#v\n%d", row, reftab.Kind())
+
 	if reftab.Kind() == reflect.Chan {
 		isChan = true
 		reftab = reftab.Elem()
