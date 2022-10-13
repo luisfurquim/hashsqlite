@@ -26,6 +26,7 @@ func (hs *HashSqlite) Save(row interface{}) (int64, error) {
 	Goose.Query.Logf(0, "id:%d, parms: %#v", id, parms)
 
 	if id==0 {
+		Goose.Query.Logf(0, "hs.insert:%#v, tabName: %s", hs.insert, tabName)
 		id, err = hs.insert[tabName].Insert(parms...)
 		if err != nil {
 			Goose.Query.Logf(1, "Insert error on %s: %s", tabName, err)
