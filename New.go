@@ -311,6 +311,19 @@ tableLoop:
 					cols: []int{pkIndex},
 					stmt: stmt,
 				}
+
+				colNames, cols = fieldJoin(fldList)
+				stmt, err = db.Prepare(fmt.Sprintf(`SELECT rowid,` + colNames + ` FROM %s WHERE rowid=?`,  tabName))
+				if err != nil {
+					Goose.Init.Logf(1,"Err compiling select pk from %s: %s", tabName, err)
+					return nil, err
+				}
+
+				hs.list[tabName]["id:*"] = &list{
+//					tabName: tabName,
+					cols: append([]int{pkIndex},cols...),
+					stmt: stmt,
+				}
 			}
 
 			Goose.Init.Logf(0,`INSERT INTO ` + tabName + ` VALUES (?` + strings.Repeat(",?",fieldLen(fldList)-1) + `)`)

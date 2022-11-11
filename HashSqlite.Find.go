@@ -74,6 +74,10 @@ func (hs *HashSqlite) nextRow(tabName string, l *list, row reflect.Value, s *sql
 	for c, fkey = range fkeys {
 		Goose.Query.Logf(0, "c:%d, fkey:%#v", c, *(fkey.(*int64)))
 		fld = getField(row, c)
+		if *(fkey.(*int64)) == 0 {
+			fld.Set(reflect.Zero(fld.Type()))
+			continue
+		}
 		lst = l.joins[c]
 		if fldName, ok = typ.Field(c).Tag.Lookup("field"); ok && len(fldName)>0 {
 			opt = strings.Split(fldName, ",")
