@@ -43,6 +43,12 @@ func (hs *HashSqlite) getMultiRefs(row interface{}) (string, reflect.Value, bool
 		}
 
 		reftab = reftab.Elem()
+		if reftab.Kind() != reflect.Pointer {
+			Goose.Query.Logf(1, "Parameter type error: %s", ErrNotStructSlicePointer)
+			return "", refRow, isChan, ErrNotStructSlicePointer
+		}
+
+		reftab = reftab.Elem()
 		if reftab.Kind() != reflect.Struct {
 			Goose.Query.Logf(1, "Parameter type error: %s", ErrNotStructSlicePointer)
 			return "", refRow, isChan, ErrNotStructSlicePointer

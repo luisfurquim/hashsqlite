@@ -14,7 +14,6 @@ type At struct {
 
 type Schema struct {
 	Tables []interface{}
-	MxN map[string]string
 }
 
 type table struct {
@@ -35,13 +34,14 @@ type field struct {
 type tabRule struct {
 	table string
 	rule string
+	targetName string
+	targetIndex int
+	joinedIndex int
 }
 
 type list struct {
-//	tabName string
 	cols []int
 	joins map[int]tabRule
-//	filterLen int
 	stmt *sqlite.Stmt
 }
 
@@ -85,11 +85,12 @@ var Goose GooseG = GooseG{
 
 var ErrSpecNotStruct         error = errors.New("Specification is not of struct type")
 var ErrChanNotAllowed        error = errors.New("Channel not allowed")
+var ErrNoPKFound             error = errors.New("No primary key found")
 var ErrNoTablesFound         error = errors.New("No tables found")
 var ErrColumnNotFound        error = errors.New("Column not found")
 var ErrRuleNotFound	        error = errors.New("Rule not found")
 var ErrNotStructPointer      error = errors.New("Parameter must be of pointer to struct type")
-var ErrNotStructSlicePointer error = errors.New("Parameter must be of pointer to slice of struct type")
+var ErrNotStructSlicePointer error = errors.New("Parameter must be of pointer to slice of pointers to struct type")
 var ErrNotStructPointerChan  error = errors.New("Parameter must be of channel of pointer to struct type")
 var ErrNoRuleFound           error = errors.New("No rule found")
 var ErrInvalid               error = errors.New("Invalid")

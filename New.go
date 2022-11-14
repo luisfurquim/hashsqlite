@@ -46,6 +46,8 @@ func New(db *sqlite.Conn, schema Schema) (*HashSqlite, error) {
 	var flds map[int]tabRule
 	var index int
 	var fRule tabRule
+	var pkAdded bool
+	var target reflect.Type
 
 	if len(schema.Tables) == 0 {
 		Goose.Init.Logf(1,"Error: %s", ErrNoTablesFound)
@@ -106,8 +108,9 @@ tableLoop1:
 		tabName = reftab.Name()
 
 		fldList = make([]field,0,reftab.NumField())
-		xrefs = make(map[string]struct{},8)
+		xrefs   = make(map[string]struct{},8)
 		tmpList = map[string]listSpec{}
+		pkIndex = -1
 
 tableLoop:
 		for i=0; i<reftab.NumField(); i++ {
@@ -177,12 +180,18 @@ tableLoop:
 				}
 
 				fld.index = i
-
-				fldList = append(fldList, fld)
+				if !fld.joinList {
+					fldList = append(fldList, fld)
+				}
 			}
 		}
 
 		if len(fldList) > 0 {
+			if pkIndex < 0 {
+				Goose.Init.Logf(1,"Error creating %s table: %s", tabName, ErrNoPKFound)
+				return nil, ErrNoPKFound
+			}
+
 			hs.tables[tabName] = table{
 				name: tabName,
 				fields: fldList,
@@ -201,10 +210,8 @@ tableLoop:
 				return nil, err
 			}
 
-			if len(pkName)>0 {
-				colNames = "rowid," + colNames
-				cols = append([]int{pkIndex}, cols...)
-			}
+			colNames = "rowid," + colNames
+			cols = append([]int{pkIndex}, cols...)
 
 			stmt, err = db.Prepare(fmt.Sprintf(`SELECT %s FROM %s ORDER BY rowid`, colNames, tabName))
 			if err != nil {
@@ -222,42 +229,79 @@ tableLoop:
 				for rule, spec = range tmpList {
 					cols = make([]int, len(spec.cols))
 					colDef = ""
+					pkAdded = false
 					for j=0; j<len(spec.cols); j++ {
-						if (spec.cols[j] == pkName) || (spec.cols[j] == "rowid") {
+						fRule = tabRule{}
+						parts = strings.Split(spec.cols[j], ":")
+
+						if parts[0] == pkName || parts[0] == "rowid" {
 							cols[j] = pkIndex
 							if len(colDef) > 0 {
 								colDef += ","
 							}
 							colDef += "rowid"
+							k = pkIndex
+							pkAdded = true
+
 						} else {
-							ok = false
-							parts = strings.Split(spec.cols[j], ":")
-							for k=0; k<len(fldList); k++ {
-								if parts[0] == fldList[k].name {
-									cols[j] = fldList[k].index
-									if len(colDef) > 0 {
-										colDef += ","
-									}
-									colDef += parts[0]
-									ok = true
-									break
+							k, ok = fieldByName(parts[0], fldList)
+							if ok {
+								cols[j] = k
+								if len(colDef) > 0 {
+									colDef += ","
 								}
-							}
-							if !ok {
-								Goose.Init.Logf(1,"Err compiling list %s from %s: %s", rule, tabName, ErrColumnNotFound)
-								Goose.Init.Logf(1,"tmpList %#v col %s", tmpList, spec.cols[j])
-								Goose.Init.Logf(1,"fldList %#v", fldList)
-								return nil, ErrColumnNotFound
-							}
-							if len(parts) > 1 {
-								if _, ok = allJoins[tabName][rule]; !ok {
-									allJoins[tabName][rule] = map[int]tabRule{}
+								colDef += parts[0]
+								if len(parts) > 1 {
+									fRule.table = hs.tableType[reftab.Field(k).Type.Elem().Name()]
 								}
-								allJoins[tabName][rule][fldList[k].index] = tabRule{
-									table: hs.tableType[reftab.Field(fldList[k].index).Type.Elem().Name()],
-									rule:  parts[1],
+							} else {
+
+								if len(parts) == 1 {
+									Goose.Init.Logf(1,"Err compiling list %s from %s: %s", rule, tabName, ErrColumnNotFound)
+									Goose.Init.Logf(1,"tmpList %#v col %s", tmpList, spec.cols[j])
+									Goose.Init.Logf(1,"fldList %#v", fldList)
+									Goose.Init.Logf(1,"pkName %s", pkName)
+									return nil, ErrColumnNotFound
 								}
+
+								k, ok = fieldByNameFromType(parts[0], reftab)
+								if !ok {
+									Goose.Init.Logf(1,"Err compiling list %s from %s: %s", rule, tabName, ErrColumnNotFound)
+									Goose.Init.Logf(1,"tmpList %#v col %s", tmpList, spec.cols[j])
+									Goose.Init.Logf(1,"fldList %#v", fldList)
+									Goose.Init.Logf(1,"pkName %s", pkName)
+									return nil, ErrColumnNotFound
+								}
+
+								target = reftab.Field(k).Type
+								if target.Kind() != reflect.Slice || target.Elem().Kind() != reflect.Pointer {
+									Goose.Init.Logf(1,"Err compiling list %s from %s: %s", rule, tabName, ErrColumnNotFound)
+									Goose.Init.Logf(1,"tmpList %#v col %s", tmpList, spec.cols[j])
+									Goose.Init.Logf(1,"fldList %#v", fldList)
+									Goose.Init.Logf(1,"pkName %s", pkName)
+									return nil, ErrColumnNotFound
+								}
+
+								cols[j] = pkIndex
+								if len(colDef) > 0 {
+									colDef += ","
+								}
+								colDef += "rowid"
+
+								fRule.table			= hs.tableType[reftab.Field(k).Type.Elem().Elem().Name()]
+								fRule.targetName  = parts[0]
+								fRule.targetIndex = k
 							}
+
+						}
+
+						if len(parts) > 1 {
+							if _, ok = allJoins[tabName][rule]; !ok {
+								allJoins[tabName][rule] = map[int]tabRule{}
+							}
+
+							fRule.rule  = parts[1]
+							allJoins[tabName][rule][cols[j]] = fRule
 						}
 					}
 
@@ -279,14 +323,18 @@ tableLoop:
 					if len(spec.filter) > 0 {
 						spec.filter = " WHERE " + spec.filter
 					}
-//					filterLen = len(strings.Split(spec.filter,"?")) - 1
+
+					if !pkAdded {
+						cols = append(cols, pkIndex)
+						colDef += ",rowid"
+					}
 
 					stmt, err = db.Prepare(fmt.Sprintf(`SELECT %s FROM %s%s%s`, colDef, tabName, spec.filter, sortDef))
 					if err != nil {
 						Goose.Init.Logf(1,"Err compiling list %s from %s: %s", rule, tabName, err)
 						Goose.Init.Logf(1,"tmpList %#v", tmpList)
 						Goose.Init.Logf(1,"fldList %#v", fldList)
-						Goose.Init.Logf(1,"pkName %s, pkIndex: %s", pkName, pkIndex)
+						Goose.Init.Logf(1,"pkName %s, pkIndex: %d", pkName, pkIndex)
 						return nil, err
 					}
 
@@ -299,31 +347,29 @@ tableLoop:
 				}
 			}
 
-			if len(pkName) > 0 {
-				stmt, err = db.Prepare(fmt.Sprintf(`SELECT rowid FROM %s ORDER BY rowid`,  tabName))
-				if err != nil {
-					Goose.Init.Logf(1,"Err compiling list 0 from %s: %s", tabName, err)
-					return nil, err
-				}
+			stmt, err = db.Prepare(fmt.Sprintf(`SELECT rowid FROM %s ORDER BY rowid`,  tabName))
+			if err != nil {
+				Goose.Init.Logf(1,"Err compiling list 0 from %s: %s", tabName, err)
+				return nil, err
+			}
 
-				hs.list[tabName]["0"] = &list{
+			hs.list[tabName]["0"] = &list{
 //					tabName: tabName,
-					cols: []int{pkIndex},
-					stmt: stmt,
-				}
+				cols: []int{pkIndex},
+				stmt: stmt,
+			}
 
-				colNames, cols = fieldJoin(fldList)
-				stmt, err = db.Prepare(fmt.Sprintf(`SELECT rowid,` + colNames + ` FROM %s WHERE rowid=?`,  tabName))
-				if err != nil {
-					Goose.Init.Logf(1,"Err compiling select pk from %s: %s", tabName, err)
-					return nil, err
-				}
+			colNames, cols = fieldJoin(fldList)
+			stmt, err = db.Prepare(fmt.Sprintf(`SELECT rowid,` + colNames + ` FROM %s WHERE rowid=?`,  tabName))
+			if err != nil {
+				Goose.Init.Logf(1,"Err compiling select pk from %s: %s", tabName, err)
+				return nil, err
+			}
 
-				hs.list[tabName]["id:*"] = &list{
+			hs.list[tabName]["id:*"] = &list{
 //					tabName: tabName,
-					cols: append([]int{pkIndex},cols...),
-					stmt: stmt,
-				}
+				cols: append([]int{pkIndex},cols...),
+				stmt: stmt,
 			}
 
 			Goose.Init.Logf(0,`INSERT INTO ` + tabName + ` VALUES (?` + strings.Repeat(",?",fieldLen(fldList)-1) + `)`)
